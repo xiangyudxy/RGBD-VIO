@@ -1,7 +1,7 @@
 /*
-    Dec. 11, 2019, He Zhang, hzhang8@vcu.edu 
+    Dec. 3, 2020, He Zhang, fuyinzh@gmail.com 
     
-    synchronize msg similar to VINS-Mono
+    essentially run dvio, let's go 
 
 */
 
@@ -18,11 +18,12 @@
 #include "rvio.h"
 #include "parameters.h"
 #include "visualization.h"
-
+#include "plane_correct_pose.h"
 
 #define R2D(r) ((r)*180./M_PI)
 
 RVIO rvio;
+PlaneCorrectPose planeCorrectPose; 
 
 std::condition_variable con;
 double current_time = -1;
@@ -268,19 +269,19 @@ void process()
                     // ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO16);
                     cv_bridge::CvImageConstPtr ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO16);
                     rvio.associateDepthSimple(image, ptr->image); 
-                    // if(rvio.solver_flag != INITIAL)
-                    //    b_get_floor = rvio.getFloorAndObstacle(ptr->image); 
-                    // rvio.associateDepthGMM(image, ptr->image); 
+                    if(rvio.solver_flag != INITIAL)
+                        b_get_floor = rvio.getFloorAndObstacle(ptr->image); 
                 }else{
                     cv_bridge::CvImageConstPtr ptr = cv_bridge::toCvCopy(dpt_ptr, sensor_msgs::image_encodings::MONO16);
                     rvio.associateDepthSimple(image, ptr->image); 
-                    // if(rvio.solver_flag != INITIAL)
-                    //    b_get_floor = rvio.getFloorAndObstacle(ptr->image); 
-                    // rvio.associateDepthGMM(image, ptr->image); 
+                    if(rvio.solver_flag != INITIAL)
+                        b_get_floor = rvio.getFloorAndObstacle(ptr->image); 
                 }
+
             }
 
-            rvio.processImage_Init(image, img_msg->header.stamp.toSec());
+            // rvio.processImage_Init(image, img_msg->header.stamp.toSec());
+            rvio.processImage_Init_dvio(image, img_msg->header.stamp.toSec()); 
 
             double whole_t = t_s.toc();
             // printStatistics(estimator, whole_t);
@@ -294,9 +295,11 @@ void process()
             pubTF(rvio, header);
             if(rvio.solver_flag != INITIAL){
                 if(b_get_floor){
-                    // pubFloorPoint(rvio, header); 
+                    pubFloorPoint(rvio, header); 
                 }
-                // pubNonFloorPoint(rvio, header); 
+                //  pubNonFloorPoint(rvio, header); 
+                planeCorrectPose.correctPose(rvio);
+                pubPlaneCorrectedOdometry(planeCorrectPose.getCurrPose(), header);
             }
             // pubKeyframe(estimator);
             //ROS_ERROR("end: %f, at %f", img_msg->header.stamp.toSec(), ros::Time::now().toSec());
@@ -310,6 +313,8 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "vins_estimator");
     ros::NodeHandle n("~");
     ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug); // Info
+    OUTPUT_FILE_NAME = "run_dvio.csv";
+    OUTPUT_COR_FILE_NAME = "run_dvio_corrected.csv"; 
     readParameters(n);
     rvio.setParameter();
     ROS_WARN("waiting for image and imu...");
